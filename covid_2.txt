@@ -1,0 +1,108 @@
+import java.io.IOException;
+import java.util.*;
+import java.lang.*;
+
+import org.apache.hadoop.conf.*;
+import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.io.*;
+import org.apache.hadoop.mapreduce.*;
+import org.apache.hadoop.mapreduce.lib.input.*;
+import org.apache.hadoop.mapreduce.lib.output.*;
+
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.text.ParseException;
+
+public class Covid19_2 
+{
+	
+	public static class Covid_Mapper extends Mapper<Object, Text, Text, LongWritable>
+	{
+		
+		private Text country = new Text();
+		
+		
+		public void map(Object key, Text value, Context context) throws IOException, InterruptedException
+		{
+			String[] cols = value.toString().split(",");
+			Configuration conf = context.getConfiguration();
+
+			SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+			Date start = new Date();
+			Date end = new Date();	
+			Date current = new Date();
+
+			try
+			{
+				if (!cols[0].equals("date"))
+					{
+						start = sdf.parse(conf.get("Start"));
+						end = sdf.parse(conf.get("End"));
+						current = sdf.parse(cols[0]);
+
+						
+						if ((current.compareTo(start)>=0) && (current.compareTo(end)<=0))
+						{
+							Long num_deaths = Long.parseLong(cols[3]);
+							country.set(cols[1]);
+							LongWritable death_count = new LongWritable(num_deaths);
+							context.write(country, death_count);
+						}
+					}
+			}	
+			catch (ParseException e)
+			{
+				System.out.println("Date Parsing failed! Wrong date format specified in start and/or end dates");
+				System.exit(1);
+			}	
+		}
+	}
+
+
+	public static class Covid_Reducer extends Reducer<Text, LongWritable, Text, LongWritable>
+	{
+		
+		private LongWritable total_cases = new LongWritable();
+
+	
+		public void reduce(Text key, Iterable<LongWritable> values, Context context) throws IOException, InterruptedException
+		{
+			long sum=0;
+
+			for (LongWritable tmp: values)
+			{
+				sum+= tmp.get();
+			}
+
+			total_cases.set(sum);
+			context.write(key, total_cases);
+		}
+	}
+
+	public static void main(String[] args) throws Exception
+	{
+		Configuration conf = new Configuration();
+
+		Date start = new Date();
+		Date end = new Date();
+		SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd");
+
+		
+		start = sdf.parse(args[1]);
+		end = sdf.parse(args[2]);
+
+		System.out.println("Start "+args[1]+" "+args[2]);
+
+		conf.set("Start", args[1]);
+		conf.set("End", args[2]);
+
+		Job covid_job = Job.getInstance(conf, "Covid Num Deaths by Country");
+		covid_job.setJarByClass(Covid19_2.class);
+		covid_job.setMapperClass(Covid_Mapper.class);
+		covid_job.setReducerClass(Covid_Reducer.class);
+		covid_job.setOutputKeyClass(Text.class);
+		covid_job.setOutputValueClass(LongWritable.class);
+
+		FileInputFormat.addInputPath(covid_job, new Path(args[0]));
+		FileOutputFormat.setOutputPath(covid_job, new Path(args[3]));
+		System.exit(covid_job.waitForCompletion(true)? 0:1);
